@@ -104,7 +104,7 @@ This section will show how to use the simulator. Here let `$HADOOP_ROOT` represe
 *   `sample-data`: provides an example rumen trace, which can be used to
     generate inputs of the simulator.
 
-The following sections will describe how to use the simulator step by step. Before start, make sure that command `hadoop` is included in your `$PATH` environment parameter.
+The following sections will describe how to use the simulator step by step.
 
 ### Step 1: Configure Hadoop and the simulator
 
