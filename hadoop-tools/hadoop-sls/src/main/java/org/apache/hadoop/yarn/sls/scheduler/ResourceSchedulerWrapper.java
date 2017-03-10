@@ -818,7 +818,6 @@ final public class ResourceSchedulerWrapper
     ((AbstractYarnScheduler<SchedulerApplicationAttempt, SchedulerNode>)
         scheduler).init(conf);
     super.serviceInit(conf);
-    initScheduler(conf);
   }
 
   private synchronized void initScheduler(Configuration configuration) throws
