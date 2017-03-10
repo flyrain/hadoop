@@ -168,15 +168,14 @@ public class SLSFairScheduler extends FairScheduler implements
   @Override
   public Allocation allocate(ApplicationAttemptId attemptId,
       List<ResourceRequest> resourceRequests, List<ContainerId> containerIds,
-      List<String> strings, List<String> strings2,
+      List<String> blacklistAdditions, List<String> blacklistRemovals,
       ContainerUpdates updateRequests) {
     if (metricsON) {
       final Timer.Context context = schedulerAllocateTimer.time();
       Allocation allocation = null;
       try {
-        allocation = super
-            .allocate(attemptId, resourceRequests, containerIds, strings,
-                strings2, updateRequests);
+        allocation = super.allocate(attemptId, resourceRequests, containerIds,
+            blacklistAdditions, blacklistRemovals, updateRequests);
         return allocation;
       } finally {
         context.stop();
@@ -189,27 +188,29 @@ public class SLSFairScheduler extends FairScheduler implements
         }
       }
     } else {
-      return super.allocate(attemptId, resourceRequests, containerIds, strings,
-          strings2, updateRequests);
+      return super.allocate(attemptId, resourceRequests, containerIds,
+          blacklistAdditions, blacklistRemovals, updateRequests);
     }
   }
 
   @Override
   public void handle(SchedulerEvent schedulerEvent) {
     // metrics off
-    if (! metricsON) {
+    if (!metricsON) {
       super.handle(schedulerEvent);
       return;
     }
-    if(!running)    running = true;
 
     // metrics on
+    if(!running) {
+      running = true;
+    }
+
     Timer.Context handlerTimer = null;
     Timer.Context operationTimer = null;
 
     NodeUpdateSchedulerEventWrapper eventWrapper;
     try {
-      //if (schedulerEvent instanceof NodeUpdateSchedulerEvent) {
       if (schedulerEvent.getType() == SchedulerEventType.NODE_UPDATE
           && schedulerEvent instanceof NodeUpdateSchedulerEvent) {
         eventWrapper = new NodeUpdateSchedulerEventWrapper(
@@ -414,8 +415,11 @@ public class SLSFairScheduler extends FairScheduler implements
     if (jobRuntimeLogBW != null) {
       jobRuntimeLogBW.close();
     }
+
     // shut pool
-    if (pool != null)  pool.shutdown();
+    if (pool != null) {
+      pool.shutdown();
+    }
   }
 
   @SuppressWarnings({ "unchecked", "rawtypes" })
@@ -580,7 +584,7 @@ public class SLSFairScheduler extends FairScheduler implements
           "counter.scheduler.operation.allocate");
       schedulerHandleCounter = metrics.counter(
           "counter.scheduler.operation.handle");
-      schedulerHandleCounterMap = new HashMap<SchedulerEventType, Counter>();
+      schedulerHandleCounterMap = new HashMap<>();
       for (SchedulerEventType e : SchedulerEventType.values()) {
         Counter counter = metrics.counter(
             "counter.scheduler.operation.handle." + e);
@@ -594,14 +598,14 @@ public class SLSFairScheduler extends FairScheduler implements
           new SlidingWindowReservoir(timeWindowSize));
       schedulerHandleTimer = new Timer(
           new SlidingWindowReservoir(timeWindowSize));
-      schedulerHandleTimerMap = new HashMap<SchedulerEventType, Timer>();
+      schedulerHandleTimerMap = new HashMap<>();
       for (SchedulerEventType e : SchedulerEventType.values()) {
         Timer timer = new Timer(new SlidingWindowReservoir(timeWindowSize));
         schedulerHandleTimerMap.put(e, timer);
       }
       // histogram for scheduler operations (Samplers)
-      schedulerHistogramList = new ArrayList<Histogram>();
-      histogramTimerMap = new HashMap<Histogram, Timer>();
+      schedulerHistogramList = new ArrayList<>();
+      histogramTimerMap = new HashMap<>();
       Histogram schedulerAllocateHistogram = new Histogram(
           new SlidingWindowReservoir(SAMPLING_SIZE));
       metrics.register("sampler.scheduler.operation.allocate.timecost",
@@ -694,7 +698,6 @@ public class SLSFairScheduler extends FairScheduler implements
     }
   }
 
-  // the following functions are used by AMSimulator
   public void addAMRuntime(ApplicationId appId,
       long traceStartTimeMS, long traceEndTimeMS,
       long simulateStartTimeMS, long simulateEndTimeMS) {
@@ -801,7 +804,6 @@ public class SLSFairScheduler extends FairScheduler implements
     return schedulerMetrics;
   }
 
-  // API open to out classes
   public void addTrackedApp(ApplicationAttemptId appAttemptId,
       String oldAppId) {
     if (metricsON) {
