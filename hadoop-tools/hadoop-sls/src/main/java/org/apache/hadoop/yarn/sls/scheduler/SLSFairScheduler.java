@@ -17,26 +17,13 @@
  */
 package org.apache.hadoop.yarn.sls.scheduler;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStreamWriter;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
-import java.util.SortedMap;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
-
+import com.codahale.metrics.Counter;
+import com.codahale.metrics.CsvReporter;
+import com.codahale.metrics.Gauge;
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.SlidingWindowReservoir;
+import com.codahale.metrics.Timer;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configurable;
@@ -57,36 +44,45 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.Allocation;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ContainerUpdates;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerAppReport;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplication;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CSQueue;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.LeafQueue;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.AppAttemptAddedSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.AppAttemptRemovedSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.NodeUpdateSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEventType;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSLeafQueue;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSQueue;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.apache.hadoop.yarn.sls.SLSRunner;
 import org.apache.hadoop.yarn.sls.conf.SLSConfiguration;
 import org.apache.hadoop.yarn.sls.web.SLSWebApp;
 import org.apache.hadoop.yarn.util.resource.Resources;
 import org.apache.log4j.Logger;
 
-import com.codahale.metrics.Counter;
-import com.codahale.metrics.CsvReporter;
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Histogram;
-import com.codahale.metrics.MetricRegistry;
-import com.codahale.metrics.SlidingWindowReservoir;
-import com.codahale.metrics.Timer;
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Private
 @Unstable
-public class SLSCapacityScheduler extends CapacityScheduler implements
-        SchedulerWrapper,Configurable {
+public class SLSFairScheduler extends FairScheduler implements
+    SchedulerWrapper,Configurable {
   private static final String EOL = System.getProperty("line.separator");
-  private static final String QUEUE_COUNTER_PREFIX = "counter.queue.";
   private static final int SAMPLING_SIZE = 60;
   private ScheduledExecutorService pool;
   // counters for scheduler allocate/handle operations
@@ -103,9 +99,9 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   private Lock queueLock;
 
   private Configuration conf;
- 
+
   private Map<ApplicationAttemptId, String> appQueueMap =
-          new ConcurrentHashMap<ApplicationAttemptId, String>();
+      new ConcurrentHashMap<>();
   private BufferedWriter jobRuntimeLogBW;
 
   // Priority of the ResourceSchedulerWrapper shutdown hook.
@@ -115,7 +111,7 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   private SLSWebApp web;
 
   private Map<ContainerId, Resource> preemptionContainerMap =
-          new ConcurrentHashMap<ContainerId, Resource>();
+      new ConcurrentHashMap<>();
 
   // metrics
   private MetricRegistry metrics;
@@ -129,9 +125,9 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   private Set<String> queueSet;
   private Set<String> trackedAppSet;
 
-  public final Logger LOG = Logger.getLogger(SLSCapacityScheduler.class);
+  public final Logger LOG = Logger.getLogger(SLSFairScheduler.class);
 
-  public SLSCapacityScheduler() {
+  public SLSFairScheduler() {
     samplerLock = new ReentrantLock();
     queueLock = new ReentrantLock();
   }
@@ -139,7 +135,7 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   @Override
   public void setConf(Configuration conf) {
     this.conf = conf;
-    super.setConf(conf);
+    super.setConfig(conf);
     // start metrics
     metricsON = conf.getBoolean(SLSConfiguration.METRICS_SWITCH, true);
     if (metricsON) {
@@ -187,7 +183,7 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
         schedulerAllocateCounter.inc();
         try {
           updateQueueWithAllocateRequest(allocation, attemptId,
-                  resourceRequests, containerIds);
+              resourceRequests, containerIds);
         } catch (IOException e) {
           e.printStackTrace();
         }
@@ -200,85 +196,85 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
 
   @Override
   public void handle(SchedulerEvent schedulerEvent) {
-	    // metrics off
-	    if (! metricsON) {
-	      super.handle(schedulerEvent);
-	      return;
-	    }
-	    if(!running)    running = true;
+    // metrics off
+    if (! metricsON) {
+      super.handle(schedulerEvent);
+      return;
+    }
+    if(!running)    running = true;
 
-	    // metrics on
-	    Timer.Context handlerTimer = null;
-	    Timer.Context operationTimer = null;
+    // metrics on
+    Timer.Context handlerTimer = null;
+    Timer.Context operationTimer = null;
 
-	    NodeUpdateSchedulerEventWrapper eventWrapper;
-	    try {
-	      //if (schedulerEvent instanceof NodeUpdateSchedulerEvent) {
-	      if (schedulerEvent.getType() == SchedulerEventType.NODE_UPDATE
-	              && schedulerEvent instanceof NodeUpdateSchedulerEvent) {
-	        eventWrapper = new NodeUpdateSchedulerEventWrapper(
-	                (NodeUpdateSchedulerEvent)schedulerEvent);
-	        schedulerEvent = eventWrapper;
-	        updateQueueWithNodeUpdate(eventWrapper);
-	      } else if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_REMOVED
-	          && schedulerEvent instanceof AppAttemptRemovedSchedulerEvent) {
-	        // check if having AM Container, update resource usage information
-	        AppAttemptRemovedSchedulerEvent appRemoveEvent =
-	            (AppAttemptRemovedSchedulerEvent) schedulerEvent;
-	        ApplicationAttemptId appAttemptId =
-	                appRemoveEvent.getApplicationAttemptID();
-	        String queue = appQueueMap.get(appAttemptId);
-	        SchedulerAppReport app = super.getSchedulerAppInfo(appAttemptId);
-	        if (! app.getLiveContainers().isEmpty()) {  // have 0 or 1
-	          // should have one container which is AM container
-	          RMContainer rmc = app.getLiveContainers().iterator().next();
-	          updateQueueMetrics(queue,
-	                  rmc.getContainer().getResource().getMemorySize(),
-	                  rmc.getContainer().getResource().getVirtualCores());
-	        }
-	      }
+    NodeUpdateSchedulerEventWrapper eventWrapper;
+    try {
+      //if (schedulerEvent instanceof NodeUpdateSchedulerEvent) {
+      if (schedulerEvent.getType() == SchedulerEventType.NODE_UPDATE
+          && schedulerEvent instanceof NodeUpdateSchedulerEvent) {
+        eventWrapper = new NodeUpdateSchedulerEventWrapper(
+            (NodeUpdateSchedulerEvent)schedulerEvent);
+        schedulerEvent = eventWrapper;
+        updateQueueWithNodeUpdate(eventWrapper);
+      } else if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_REMOVED
+          && schedulerEvent instanceof AppAttemptRemovedSchedulerEvent) {
+        // check if having AM Container, update resource usage information
+        AppAttemptRemovedSchedulerEvent appRemoveEvent =
+            (AppAttemptRemovedSchedulerEvent) schedulerEvent;
+        ApplicationAttemptId appAttemptId =
+            appRemoveEvent.getApplicationAttemptID();
+        String queue = appQueueMap.get(appAttemptId);
+        SchedulerAppReport app = super.getSchedulerAppInfo(appAttemptId);
+        if (! app.getLiveContainers().isEmpty()) {  // have 0 or 1
+          // should have one container which is AM container
+          RMContainer rmc = app.getLiveContainers().iterator().next();
+          updateQueueMetrics(queue,
+              rmc.getContainer().getResource().getMemorySize(),
+              rmc.getContainer().getResource().getVirtualCores());
+        }
+      }
 
-	      handlerTimer = schedulerHandleTimer.time();
-	      operationTimer = schedulerHandleTimerMap
-	              .get(schedulerEvent.getType()).time();
+      handlerTimer = schedulerHandleTimer.time();
+      operationTimer = schedulerHandleTimerMap
+          .get(schedulerEvent.getType()).time();
 
-	      super.handle(schedulerEvent);
-	    } finally {
-	      if (handlerTimer != null)     handlerTimer.stop();
-	      if (operationTimer != null)   operationTimer.stop();
-	      schedulerHandleCounter.inc();
-	      schedulerHandleCounterMap.get(schedulerEvent.getType()).inc();
+      super.handle(schedulerEvent);
+    } finally {
+      if (handlerTimer != null)     handlerTimer.stop();
+      if (operationTimer != null)   operationTimer.stop();
+      schedulerHandleCounter.inc();
+      schedulerHandleCounterMap.get(schedulerEvent.getType()).inc();
 
-	      if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_REMOVED
-	          && schedulerEvent instanceof AppAttemptRemovedSchedulerEvent) {
-	        SLSRunner.decreaseRemainingApps();
-	        AppAttemptRemovedSchedulerEvent appRemoveEvent =
-	                (AppAttemptRemovedSchedulerEvent) schedulerEvent;
-	        ApplicationAttemptId appAttemptId =
-	                appRemoveEvent.getApplicationAttemptID();
-	        appQueueMap.remove(appRemoveEvent.getApplicationAttemptID());
-	      } else if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_ADDED
-	          && schedulerEvent instanceof AppAttemptAddedSchedulerEvent) {
-          AppAttemptAddedSchedulerEvent appAddEvent =
-              (AppAttemptAddedSchedulerEvent) schedulerEvent;
-          SchedulerApplication app =
-              applications.get(appAddEvent.getApplicationAttemptId()
+      if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_REMOVED
+          && schedulerEvent instanceof AppAttemptRemovedSchedulerEvent) {
+        SLSRunner.decreaseRemainingApps();
+        AppAttemptRemovedSchedulerEvent appRemoveEvent =
+            (AppAttemptRemovedSchedulerEvent) schedulerEvent;
+        ApplicationAttemptId appAttemptId =
+            appRemoveEvent.getApplicationAttemptID();
+        appQueueMap.remove(appRemoveEvent.getApplicationAttemptID());
+      } else if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_ADDED
+          && schedulerEvent instanceof AppAttemptAddedSchedulerEvent) {
+        AppAttemptAddedSchedulerEvent appAddEvent =
+            (AppAttemptAddedSchedulerEvent) schedulerEvent;
+        SchedulerApplication app =
+            applications.get(appAddEvent.getApplicationAttemptId()
                 .getApplicationId());
-          appQueueMap.put(appAddEvent.getApplicationAttemptId(), app.getQueue()
-              .getQueueName());
-	      }
-	    }
+        appQueueMap.put(appAddEvent.getApplicationAttemptId(), app.getQueue()
+            .getQueueName());
+      }
+    }
   }
 
   private void updateQueueWithNodeUpdate(
-          NodeUpdateSchedulerEventWrapper eventWrapper) {
+      NodeUpdateSchedulerEventWrapper eventWrapper) {
     RMNodeWrapper node = (RMNodeWrapper) eventWrapper.getRMNode();
     List<UpdatedContainerInfo> containerList = node.getContainerUpdates();
     for (UpdatedContainerInfo info : containerList) {
       for (ContainerStatus status : info.getCompletedContainers()) {
         ContainerId containerId = status.getContainerId();
         SchedulerAppReport app = super.getSchedulerAppInfo(
-                containerId.getApplicationAttemptId());
+            containerId.getApplicationAttemptId());
 
         if (app == null) {
           // this happens for the AM container
@@ -294,7 +290,7 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
             if (rmc.getContainerId() == containerId) {
               releasedMemory += rmc.getContainer().getResource().getMemorySize();
               releasedVCores += rmc.getContainer()
-                      .getResource().getVirtualCores();
+                  .getResource().getVirtualCores();
               break;
             }
           }
@@ -313,9 +309,9 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   }
 
   private void updateQueueWithAllocateRequest(Allocation allocation,
-                        ApplicationAttemptId attemptId,
-                        List<ResourceRequest> resourceRequests,
-                        List<ContainerId> containerIds) throws IOException {
+      ApplicationAttemptId attemptId,
+      List<ResourceRequest> resourceRequests,
+      List<ContainerId> containerIds) throws IOException {
     // update queue information
     Resource pendingResource = Resources.createResource(0, 0);
     Resource allocatedResource = Resources.createResource(0, 0);
@@ -324,8 +320,8 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
     for (ResourceRequest request : resourceRequests) {
       if (request.getResourceName().equals(ResourceRequest.ANY)) {
         Resources.addTo(pendingResource,
-                Resources.multiply(request.getCapability(),
-                        request.getNumContainers()));
+            Resources.multiply(request.getCapability(),
+                request.getNumContainers()));
       }
     }
     // container allocated
@@ -388,13 +384,13 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
     // update metrics
     SortedMap<String, Counter> counterMap = metrics.getCounters();
     String names[] = new String[]{
-            "counter.queue." + queueName + ".pending.memory",
-            "counter.queue." + queueName + ".pending.cores",
-            "counter.queue." + queueName + ".allocated.memory",
-            "counter.queue." + queueName + ".allocated.cores"};
+        "counter.queue." + queueName + ".pending.memory",
+        "counter.queue." + queueName + ".pending.cores",
+        "counter.queue." + queueName + ".allocated.memory",
+        "counter.queue." + queueName + ".allocated.cores"};
     long values[] = new long[]{pendingResource.getMemorySize(),
-            pendingResource.getVirtualCores(),
-            allocatedResource.getMemorySize(), allocatedResource.getVirtualCores()};
+        pendingResource.getVirtualCores(),
+        allocatedResource.getMemorySize(), allocatedResource.getVirtualCores()};
     for (int i = names.length - 1; i >= 0; i --) {
       if (! counterMap.containsKey(names[i])) {
         metrics.counter(names[i]);
@@ -428,15 +424,15 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
     // configuration
     metricsOutputDir = conf.get(SLSConfiguration.METRICS_OUTPUT_DIR);
     int metricsWebAddressPort = conf.getInt(
-            SLSConfiguration.METRICS_WEB_ADDRESS_PORT,
-            SLSConfiguration.METRICS_WEB_ADDRESS_PORT_DEFAULT);
+        SLSConfiguration.METRICS_WEB_ADDRESS_PORT,
+        SLSConfiguration.METRICS_WEB_ADDRESS_PORT_DEFAULT);
     // create SchedulerMetrics for current scheduler
-    String schedulerMetricsType = conf.get(CapacityScheduler.class.getName());
-    Class schedulerMetricsClass = schedulerMetricsType == null?
-        SchedulerMetrics.defaultSchedulerMetricsMap.get(CapacityScheduler.class)
-        : Class.forName(schedulerMetricsType);
+    String schedulerMetricsType = conf.get(FairScheduler.class.getName());
+    Class schedulerMetricsClass = schedulerMetricsType == null ?
+        SchedulerMetrics.defaultSchedulerMetricsMap.get(FairScheduler.class) :
+        Class.forName(schedulerMetricsType);
     schedulerMetrics = (SchedulerMetrics)ReflectionUtils
-            .newInstance(schedulerMetricsClass, new Configuration());
+        .newInstance(schedulerMetricsClass, new Configuration());
     schedulerMetrics.init(this, metrics);
 
     // register various metrics
@@ -455,118 +451,94 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
     // a thread to update histogram timer
     pool = new ScheduledThreadPoolExecutor(2);
     pool.scheduleAtFixedRate(new HistogramsRunnable(), 0, 1000,
-            TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS);
 
     // a thread to output metrics for real-tiem tracking
     pool.scheduleAtFixedRate(new MetricsLogRunnable(), 0, 1000,
-            TimeUnit.MILLISECONDS);
+        TimeUnit.MILLISECONDS);
 
     // application running information
     jobRuntimeLogBW =
         new BufferedWriter(new OutputStreamWriter(new FileOutputStream(
             metricsOutputDir + "/jobruntime.csv"), "UTF-8"));
     jobRuntimeLogBW.write("JobID,real_start_time,real_end_time," +
-            "simulate_start_time,simulate_end_time" + EOL);
+        "simulate_start_time,simulate_end_time" + EOL);
     jobRuntimeLogBW.flush();
   }
 
   private void registerJvmMetrics() {
     // add JVM gauges
     metrics.register("variable.jvm.free.memory",
-      new Gauge<Long>() {
-        @Override
-        public Long getValue() {
-          return Runtime.getRuntime().freeMemory();
+        new Gauge<Long>() {
+          @Override
+          public Long getValue() {
+            return Runtime.getRuntime().freeMemory();
+          }
         }
-      }
     );
     metrics.register("variable.jvm.max.memory",
-      new Gauge<Long>() {
-        @Override
-        public Long getValue() {
-          return Runtime.getRuntime().maxMemory();
+        new Gauge<Long>() {
+          @Override
+          public Long getValue() {
+            return Runtime.getRuntime().maxMemory();
+          }
         }
-      }
     );
     metrics.register("variable.jvm.total.memory",
-      new Gauge<Long>() {
-        @Override
-        public Long getValue() {
-          return Runtime.getRuntime().totalMemory();
+        new Gauge<Long>() {
+          @Override
+          public Long getValue() {
+            return Runtime.getRuntime().totalMemory();
+          }
         }
-      }
     );
   }
 
   private void registerClusterResourceMetrics() {
     metrics.register("variable.cluster.allocated.memory",
-      new Gauge<Long>() {
-        @Override
-        public Long getValue() {
-          if( getRootQueueMetrics() == null) {
-            return 0L;
-          } else {
-            return getRootQueueMetrics().getAllocatedMB();
-          }
-        }
-      }
-    );
-    metrics.register("variable.cluster.allocated.vcores",
-      new Gauge<Integer>() {
-        @Override
-        public Integer getValue() {
-          if(getRootQueueMetrics() == null) {
-            return 0;
-          } else {
-            return getRootQueueMetrics().getAllocatedVirtualCores();
-          }
-        }
-      }
-    );
-    metrics.register("variable.cluster.available.memory",
-      new Gauge<Long>() {
-        @Override
-        public Long getValue() {
-          if(getRootQueueMetrics() == null) {
-            return 0L;
-          } else {
-            return getRootQueueMetrics().getAvailableMB();
-          }
-        }
-      }
-    );
-    metrics.register("variable.cluster.available.vcores",
-      new Gauge<Integer>() {
-        @Override
-        public Integer getValue() {
-          if(getRootQueueMetrics() == null) {
-            return 0;
-          } else {
-            return getRootQueueMetrics().getAvailableVirtualCores();
-          }
-        }
-      }
-    );
-    metrics.register("variable.cluster.reserved.memory",
         new Gauge<Long>() {
           @Override
           public Long getValue() {
-            if(getRootQueueMetrics() == null) {
+            if( getRootQueueMetrics() == null) {
               return 0L;
             } else {
-              return getRootQueueMetrics().getReservedMB();
+              return getRootQueueMetrics().getAllocatedMB();
             }
           }
         }
     );
-    metrics.register("variable.cluster.reserved.vcores",
+    metrics.register("variable.cluster.allocated.vcores",
         new Gauge<Integer>() {
           @Override
           public Integer getValue() {
             if(getRootQueueMetrics() == null) {
               return 0;
             } else {
-              return getRootQueueMetrics().getReservedVirtualCores();
+              return getRootQueueMetrics().getAllocatedVirtualCores();
+            }
+          }
+        }
+    );
+    metrics.register("variable.cluster.available.memory",
+        new Gauge<Long>() {
+          @Override
+          public Long getValue() {
+            if(getRootQueueMetrics() == null) {
+              return 0L;
+            } else {
+              return getRootQueueMetrics().getAvailableMB();
+            }
+          }
+        }
+    );
+    metrics.register("variable.cluster.available.vcores",
+        new Gauge<Integer>() {
+          @Override
+          public Integer getValue() {
+            if(getRootQueueMetrics() == null) {
+              return 0;
+            } else {
+              return getRootQueueMetrics().getAvailableVirtualCores();
             }
           }
         }
@@ -575,28 +547,28 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
 
   private void registerContainerAppNumMetrics() {
     metrics.register("variable.running.application",
-      new Gauge<Integer>() {
-        @Override
-        public Integer getValue() {
-          if(getRootQueueMetrics() == null) {
-            return 0;
-          } else {
-            return getRootQueueMetrics().getAppsRunning();
+        new Gauge<Integer>() {
+          @Override
+          public Integer getValue() {
+            if(getRootQueueMetrics() == null) {
+              return 0;
+            } else {
+              return getRootQueueMetrics().getAppsRunning();
+            }
           }
         }
-      }
     );
     metrics.register("variable.running.container",
-      new Gauge<Integer>() {
-        @Override
-        public Integer getValue() {
-          if(getRootQueueMetrics() == null) {
-            return 0;
-          } else {
-            return getRootQueueMetrics().getAllocatedContainers();
+        new Gauge<Integer>() {
+          @Override
+          public Integer getValue() {
+            if(getRootQueueMetrics() == null) {
+              return 0;
+            } else {
+              return getRootQueueMetrics().getAllocatedContainers();
+            }
           }
         }
-      }
     );
   }
 
@@ -605,23 +577,23 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
     try {
       // counters for scheduler operations
       schedulerAllocateCounter = metrics.counter(
-              "counter.scheduler.operation.allocate");
+          "counter.scheduler.operation.allocate");
       schedulerHandleCounter = metrics.counter(
-              "counter.scheduler.operation.handle");
+          "counter.scheduler.operation.handle");
       schedulerHandleCounterMap = new HashMap<SchedulerEventType, Counter>();
       for (SchedulerEventType e : SchedulerEventType.values()) {
         Counter counter = metrics.counter(
-                "counter.scheduler.operation.handle." + e);
+            "counter.scheduler.operation.handle." + e);
         schedulerHandleCounterMap.put(e, counter);
       }
       // timers for scheduler operations
       int timeWindowSize = conf.getInt(
-              SLSConfiguration.METRICS_TIMER_WINDOW_SIZE,
-              SLSConfiguration.METRICS_TIMER_WINDOW_SIZE_DEFAULT);
+          SLSConfiguration.METRICS_TIMER_WINDOW_SIZE,
+          SLSConfiguration.METRICS_TIMER_WINDOW_SIZE_DEFAULT);
       schedulerAllocateTimer = new Timer(
-              new SlidingWindowReservoir(timeWindowSize));
+          new SlidingWindowReservoir(timeWindowSize));
       schedulerHandleTimer = new Timer(
-              new SlidingWindowReservoir(timeWindowSize));
+          new SlidingWindowReservoir(timeWindowSize));
       schedulerHandleTimerMap = new HashMap<SchedulerEventType, Timer>();
       for (SchedulerEventType e : SchedulerEventType.values()) {
         Timer timer = new Timer(new SlidingWindowReservoir(timeWindowSize));
@@ -631,23 +603,23 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
       schedulerHistogramList = new ArrayList<Histogram>();
       histogramTimerMap = new HashMap<Histogram, Timer>();
       Histogram schedulerAllocateHistogram = new Histogram(
-              new SlidingWindowReservoir(SAMPLING_SIZE));
+          new SlidingWindowReservoir(SAMPLING_SIZE));
       metrics.register("sampler.scheduler.operation.allocate.timecost",
-              schedulerAllocateHistogram);
+          schedulerAllocateHistogram);
       schedulerHistogramList.add(schedulerAllocateHistogram);
       histogramTimerMap.put(schedulerAllocateHistogram, schedulerAllocateTimer);
       Histogram schedulerHandleHistogram = new Histogram(
-              new SlidingWindowReservoir(SAMPLING_SIZE));
+          new SlidingWindowReservoir(SAMPLING_SIZE));
       metrics.register("sampler.scheduler.operation.handle.timecost",
-              schedulerHandleHistogram);
+          schedulerHandleHistogram);
       schedulerHistogramList.add(schedulerHandleHistogram);
       histogramTimerMap.put(schedulerHandleHistogram, schedulerHandleTimer);
       for (SchedulerEventType e : SchedulerEventType.values()) {
         Histogram histogram = new Histogram(
-                new SlidingWindowReservoir(SAMPLING_SIZE));
+            new SlidingWindowReservoir(SAMPLING_SIZE));
         metrics.register(
-                "sampler.scheduler.operation.handle." + e + ".timecost",
-                histogram);
+            "sampler.scheduler.operation.handle." + e + ".timecost",
+            histogram);
         schedulerHistogramList.add(histogram);
         histogramTimerMap.put(histogram, schedulerHandleTimerMap.get(e));
       }
@@ -658,18 +630,18 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
 
   private void initMetricsCSVOutput() {
     int timeIntervalMS = conf.getInt(
-            SLSConfiguration.METRICS_RECORD_INTERVAL_MS,
-            SLSConfiguration.METRICS_RECORD_INTERVAL_MS_DEFAULT);
+        SLSConfiguration.METRICS_RECORD_INTERVAL_MS,
+        SLSConfiguration.METRICS_RECORD_INTERVAL_MS_DEFAULT);
     File dir = new File(metricsOutputDir + "/metrics");
     if(! dir.exists()
-            && ! dir.mkdirs()) {
+        && ! dir.mkdirs()) {
       LOG.error("Cannot create directory " + dir.getAbsoluteFile());
     }
     final CsvReporter reporter = CsvReporter.forRegistry(metrics)
-            .formatFor(Locale.US)
-            .convertRatesTo(TimeUnit.SECONDS)
-            .convertDurationsTo(TimeUnit.MILLISECONDS)
-            .build(new File(metricsOutputDir + "/metrics"));
+        .formatFor(Locale.US)
+        .convertRatesTo(TimeUnit.SECONDS)
+        .convertDurationsTo(TimeUnit.MILLISECONDS)
+        .build(new File(metricsOutputDir + "/metrics"));
     reporter.start(timeIntervalMS, TimeUnit.MILLISECONDS);
   }
 
@@ -724,8 +696,8 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
 
   // the following functions are used by AMSimulator
   public void addAMRuntime(ApplicationId appId,
-                           long traceStartTimeMS, long traceEndTimeMS,
-                           long simulateStartTimeMS, long simulateEndTimeMS) {
+      long traceStartTimeMS, long traceEndTimeMS,
+      long simulateStartTimeMS, long simulateEndTimeMS) {
 
     if (metricsON) {
       try {
@@ -743,7 +715,7 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   }
 
   private void updateQueueMetrics(String queue,
-                                  long releasedMemory, int releasedVCores) {
+      long releasedMemory, int releasedVCores) {
     // update queue counters
     SortedMap<String, Counter> counterMap = metrics.getCounters();
     if (releasedMemory != 0) {
@@ -764,18 +736,18 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
     }
   }
 
-  private void initQueueMetrics(CSQueue queue) {
-    if (queue instanceof LeafQueue) {
+  private void initQueueMetrics(FSQueue queue) {
+    if (queue instanceof FSLeafQueue) {
       SortedMap<String, Counter> counterMap = metrics.getCounters();
       String queueName = queue.getQueueName();
-      String[] names = new String[]{
-          QUEUE_COUNTER_PREFIX + queueName + ".pending.memory",
-          QUEUE_COUNTER_PREFIX + queueName + ".pending.cores",
-          QUEUE_COUNTER_PREFIX + queueName + ".allocated.memory",
-          QUEUE_COUNTER_PREFIX + queueName + ".allocated.cores" };
+      String names[] = new String[]{
+          "counter.queue." + queueName + ".pending.memory",
+          "counter.queue." + queueName + ".pending.cores",
+          "counter.queue." + queueName + ".allocated.memory",
+          "counter.queue." + queueName + ".allocated.cores" };
 
-      for (int i = names.length - 1; i >= 0; i--) {
-        if (!counterMap.containsKey(names[i])) {
+      for (int i = names.length - 1; i >= 0; i --) {
+        if (! counterMap.containsKey(names[i])) {
           metrics.counter(names[i]);
           counterMap = metrics.getCounters();
         }
@@ -783,7 +755,7 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
 
       queueLock.lock();
       try {
-        if (!schedulerMetrics.isTracked(queueName)) {
+        if (! schedulerMetrics.isTracked(queueName)) {
           schedulerMetrics.trackQueue(queueName);
         }
       } finally {
@@ -793,16 +765,16 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
       return;
     }
 
-    for (CSQueue child : queue.getChildQueues()) {
+    for (FSQueue child : queue.getChildQueues()) {
       initQueueMetrics(child);
     }
   }
 
   @Override
-  public void serviceInit(Configuration configuration) throws Exception {
-    super.serviceInit(configuration);
+  public void serviceInit(Configuration conf) throws Exception {
+    super.serviceInit(conf);
 
-    initQueueMetrics(getRootQueue());
+    initQueueMetrics(getQueueManager().getRootQueue());
   }
 
   public void setQueueSet(Set<String> queues) {
@@ -831,26 +803,17 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
 
   // API open to out classes
   public void addTrackedApp(ApplicationAttemptId appAttemptId,
-                            String oldAppId) {
+      String oldAppId) {
     if (metricsON) {
       schedulerMetrics.trackApp(appAttemptId, oldAppId);
     }
   }
 
   public void removeTrackedApp(ApplicationAttemptId appAttemptId,
-                               String oldAppId) {
+      String oldAppId) {
     if (metricsON) {
       schedulerMetrics.untrackApp(appAttemptId, oldAppId);
     }
   }
-
-  @Override
-  public Configuration getConf() {
-    return conf;
-  }
-
-
-
-
 }
 

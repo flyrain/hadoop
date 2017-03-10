@@ -18,7 +18,9 @@
 
 package org.apache.hadoop.yarn.sls.scheduler;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 import org.apache.hadoop.classification.InterfaceAudience.Private;
@@ -31,6 +33,9 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler
 
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.MetricRegistry;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 
 @Private
 @Unstable
@@ -40,6 +45,17 @@ public abstract class SchedulerMetrics {
   protected MetricRegistry metrics;
   protected Set<String> appTrackedMetrics;
   protected Set<String> queueTrackedMetrics;
+
+  static Map<Class, Class> defaultSchedulerMetricsMap =
+      new HashMap<>();
+  static {
+    defaultSchedulerMetricsMap.put(FairScheduler.class,
+        FairSchedulerMetrics.class);
+    defaultSchedulerMetricsMap.put(FifoScheduler.class,
+        FifoSchedulerMetrics.class);
+    defaultSchedulerMetricsMap.put(CapacityScheduler.class,
+        CapacitySchedulerMetrics.class);
+  }
   
   public SchedulerMetrics() {
     appTrackedMetrics = new HashSet<String>();
