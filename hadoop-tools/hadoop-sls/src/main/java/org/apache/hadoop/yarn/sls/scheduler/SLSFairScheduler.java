@@ -43,8 +43,6 @@ import org.apache.hadoop.yarn.server.resourcemanager.rmnode.UpdatedContainerInfo
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.Allocation;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ContainerUpdates;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerAppReport;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplication;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.AppAttemptAddedSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.AppAttemptRemovedSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.NodeUpdateSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEvent;
@@ -84,6 +82,9 @@ public class SLSFairScheduler extends FairScheduler implements
     SchedulerWrapper,Configurable {
   private static final String EOL = System.getProperty("line.separator");
   private static final int SAMPLING_SIZE = 60;
+
+  private final Logger LOG = Logger.getLogger(SLSFairScheduler.class);
+
   private ScheduledExecutorService pool;
   // counters for scheduler allocate/handle operations
   private Counter schedulerAllocateCounter;
@@ -100,8 +101,6 @@ public class SLSFairScheduler extends FairScheduler implements
 
   private Configuration conf;
 
-  private Map<ApplicationAttemptId, String> appQueueMap =
-      new ConcurrentHashMap<>();
   private BufferedWriter jobRuntimeLogBW;
 
   // Priority of the ResourceSchedulerWrapper shutdown hook.
@@ -124,8 +123,6 @@ public class SLSFairScheduler extends FairScheduler implements
   // must set by outside
   private Set<String> queueSet;
   private Set<String> trackedAppSet;
-
-  public final Logger LOG = Logger.getLogger(SLSFairScheduler.class);
 
   public SLSFairScheduler() {
     samplerLock = new ReentrantLock();
@@ -224,12 +221,12 @@ public class SLSFairScheduler extends FairScheduler implements
             (AppAttemptRemovedSchedulerEvent) schedulerEvent;
         ApplicationAttemptId appAttemptId =
             appRemoveEvent.getApplicationAttemptID();
-        String queue = appQueueMap.get(appAttemptId);
-        SchedulerAppReport app = super.getSchedulerAppInfo(appAttemptId);
+        String queueName = getSchedulerApp(appAttemptId).getQueue().getName();
+        SchedulerAppReport app = getSchedulerAppInfo(appAttemptId);
         if (! app.getLiveContainers().isEmpty()) {  // have 0 or 1
           // should have one container which is AM container
           RMContainer rmc = app.getLiveContainers().iterator().next();
-          updateQueueMetrics(queue,
+          updateQueueMetrics(queueName,
               rmc.getContainer().getResource().getMemorySize(),
               rmc.getContainer().getResource().getVirtualCores());
         }
@@ -249,20 +246,6 @@ public class SLSFairScheduler extends FairScheduler implements
       if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_REMOVED
           && schedulerEvent instanceof AppAttemptRemovedSchedulerEvent) {
         SLSRunner.decreaseRemainingApps();
-        AppAttemptRemovedSchedulerEvent appRemoveEvent =
-            (AppAttemptRemovedSchedulerEvent) schedulerEvent;
-        ApplicationAttemptId appAttemptId =
-            appRemoveEvent.getApplicationAttemptID();
-        appQueueMap.remove(appRemoveEvent.getApplicationAttemptID());
-      } else if (schedulerEvent.getType() == SchedulerEventType.APP_ATTEMPT_ADDED
-          && schedulerEvent instanceof AppAttemptAddedSchedulerEvent) {
-        AppAttemptAddedSchedulerEvent appAddEvent =
-            (AppAttemptAddedSchedulerEvent) schedulerEvent;
-        SchedulerApplication app =
-            applications.get(appAddEvent.getApplicationAttemptId()
-                .getApplicationId());
-        appQueueMap.put(appAddEvent.getApplicationAttemptId(), app.getQueue()
-            .getQueueName());
       }
     }
   }
@@ -284,7 +267,6 @@ public class SLSFairScheduler extends FairScheduler implements
           continue;
         }
 
-        String queue = appQueueMap.get(containerId.getApplicationAttemptId());
         int releasedMemory = 0, releasedVCores = 0;
         if (status.getExitStatus() == ContainerExitStatus.SUCCESS) {
           for (RMContainer rmc : app.getLiveContainers()) {
@@ -304,6 +286,8 @@ public class SLSFairScheduler extends FairScheduler implements
           }
         }
         // update queue counters
+        String queue = getSchedulerApp(containerId.getApplicationAttemptId()).
+            getQueueName();
         updateQueueMetrics(queue, releasedMemory, releasedVCores);
       }
     }
@@ -316,7 +300,6 @@ public class SLSFairScheduler extends FairScheduler implements
     // update queue information
     Resource pendingResource = Resources.createResource(0, 0);
     Resource allocatedResource = Resources.createResource(0, 0);
-    String queueName = appQueueMap.get(attemptId);
     // container requested
     for (ResourceRequest request : resourceRequests) {
       if (request.getResourceName().equals(ResourceRequest.ANY)) {
@@ -384,6 +367,7 @@ public class SLSFairScheduler extends FairScheduler implements
 
     // update metrics
     SortedMap<String, Counter> counterMap = metrics.getCounters();
+    String queueName = getSchedulerApp(attemptId).getQueueName();
     String names[] = new String[]{
         "counter.queue." + queueName + ".pending.memory",
         "counter.queue." + queueName + ".pending.cores",
