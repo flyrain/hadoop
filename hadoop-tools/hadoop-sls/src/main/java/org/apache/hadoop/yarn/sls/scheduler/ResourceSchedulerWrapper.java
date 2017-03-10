@@ -925,11 +925,6 @@ final public class ResourceSchedulerWrapper
   }
 
   @Override
-  public RMContainer getRMContainer(ContainerId containerId) {
-    return null;
-  }
-
-  @Override
   public String moveApplication(ApplicationId appId, String newQueue)
       throws YarnException {
     return scheduler.moveApplication(appId, newQueue);
