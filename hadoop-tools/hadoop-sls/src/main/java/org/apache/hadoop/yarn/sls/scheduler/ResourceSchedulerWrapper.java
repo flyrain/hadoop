@@ -30,10 +30,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.SortedMap;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -818,6 +815,8 @@ final public class ResourceSchedulerWrapper
     ((AbstractYarnScheduler<SchedulerApplicationAttempt, SchedulerNode>)
         scheduler).init(conf);
     super.serviceInit(conf);
+    applications = (ConcurrentMap<ApplicationId, SchedulerApplication<SchedulerApplicationAttempt>>)
+        ((AbstractYarnScheduler)scheduler).getSchedulerApplications();
   }
 
   private synchronized void initScheduler(Configuration configuration) throws
@@ -940,13 +939,6 @@ final public class ResourceSchedulerWrapper
   public synchronized List<Container> getTransferredContainers(
       ApplicationAttemptId currentAttempt) {
     return new ArrayList<Container>();
-  }
-
-  @Override
-  public Map<ApplicationId, SchedulerApplication<SchedulerApplicationAttempt>>
-      getSchedulerApplications() {
-    return new HashMap<ApplicationId,
-        SchedulerApplication<SchedulerApplicationAttempt>>();
   }
 
   @Override
