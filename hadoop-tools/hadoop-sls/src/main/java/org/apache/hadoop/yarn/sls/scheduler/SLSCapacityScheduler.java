@@ -65,8 +65,6 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.AppAttemptR
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.NodeUpdateSchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEvent;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.event.SchedulerEventType;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.apache.hadoop.yarn.sls.SLSRunner;
 import org.apache.hadoop.yarn.sls.conf.SLSConfiguration;
 import org.apache.hadoop.yarn.sls.web.SLSWebApp;
@@ -830,17 +828,16 @@ public class SLSCapacityScheduler extends CapacityScheduler implements
   }
 
   // API open to out classes
-  public void addTrackedApp(ApplicationAttemptId appAttemptId,
+  public void addTrackedApp(ApplicationId appId,
                             String oldAppId) {
     if (metricsON) {
-      schedulerMetrics.trackApp(appAttemptId, oldAppId);
+      schedulerMetrics.trackApp(appId, oldAppId);
     }
   }
 
-  public void removeTrackedApp(ApplicationAttemptId appAttemptId,
-                               String oldAppId) {
+  public void removeTrackedApp(String oldAppId) {
     if (metricsON) {
-      schedulerMetrics.untrackApp(appAttemptId, oldAppId);
+      schedulerMetrics.untrackApp(oldAppId);
     }
   }
 

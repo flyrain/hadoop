@@ -25,14 +25,12 @@ import java.util.Set;
 
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
-import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler
-        .ResourceScheduler;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler
-        .SchedulerAppReport;
+import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.AbstractYarnScheduler;
 
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.MetricRegistry;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplication;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
@@ -40,7 +38,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoSchedule
 @Private
 @Unstable
 public abstract class SchedulerMetrics {
-  protected ResourceScheduler scheduler;
+  protected AbstractYarnScheduler scheduler;
   protected Set<String> trackedQueues;
   protected MetricRegistry metrics;
   protected Set<String> appTrackedMetrics;
@@ -64,36 +62,34 @@ public abstract class SchedulerMetrics {
     queueTrackedMetrics = new HashSet<String>();
   }
   
-  public void init(ResourceScheduler scheduler, MetricRegistry metrics) {
+  public void init(AbstractYarnScheduler scheduler, MetricRegistry metrics) {
     this.scheduler = scheduler;
     this.trackedQueues = new HashSet<String>();
     this.metrics = metrics;
   }
-  
-  public void trackApp(final ApplicationAttemptId appAttemptId,
-                       String oldAppId) {
+
+  public void trackApp(final ApplicationId appId, String oldAppId) {
+    SchedulerApplication app = (SchedulerApplication)
+        scheduler.getSchedulerApplications().get(appId);
     metrics.register("variable.app." + oldAppId + ".live.containers",
-      new Gauge<Integer>() {
-        @Override
-        public Integer getValue() {
-          SchedulerAppReport app = scheduler.getSchedulerAppInfo(appAttemptId);
-          return app.getLiveContainers().size();
+        new Gauge<Integer>() {
+          @Override
+          public Integer getValue() {
+            return app.getCurrentAppAttempt().getLiveContainers().size();
+          }
         }
-      }
     );
     metrics.register("variable.app." + oldAppId + ".reserved.containers",
-      new Gauge<Integer>() {
-        @Override
-        public Integer getValue() {
-          SchedulerAppReport app = scheduler.getSchedulerAppInfo(appAttemptId);
-          return app.getReservedContainers().size();
+        new Gauge<Integer>() {
+          @Override
+          public Integer getValue() {
+            return app.getCurrentAppAttempt().getLiveContainers().size();
+          }
         }
-      }
     );
   }
-  
-  public void untrackApp(ApplicationAttemptId appAttemptId,
-      String oldAppId) {
+
+  public void untrackApp(String oldAppId) {
     for (String m : appTrackedMetrics) {
       metrics.remove("variable.app." + oldAppId + "." + m);
     }

@@ -67,7 +67,6 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.Allocation;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ContainerUpdates;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.QueueMetrics;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedContainerChangeRequest;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerAppReport;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplication;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplicationAttempt;
@@ -119,7 +118,7 @@ final public class ResourceSchedulerWrapper
   private Lock queueLock;
 
   private Configuration conf;
-  private ResourceScheduler scheduler;
+  private AbstractYarnScheduler scheduler;
   private Map<ApplicationId, String> appQueueMap =
           new ConcurrentHashMap<ApplicationId, String>();
   private BufferedWriter jobRuntimeLogBW;
@@ -166,8 +165,8 @@ final public class ResourceSchedulerWrapper
   public void setConf(Configuration conf) {
     this.conf = conf;
     // set scheduler
-    Class<? extends ResourceScheduler> klass = conf.getClass(
-        SLSConfiguration.RM_SCHEDULER, null, ResourceScheduler.class);
+    Class<? extends AbstractYarnScheduler> klass = conf.getClass(
+        SLSConfiguration.RM_SCHEDULER, null, AbstractYarnScheduler.class);
 
     scheduler = ReflectionUtils.newInstance(klass, conf);
     // start metrics
@@ -790,17 +789,15 @@ final public class ResourceSchedulerWrapper
   }
 
   // API open to out classes
-  public void addTrackedApp(ApplicationAttemptId appAttemptId,
-                            String oldAppId) {
+  public void addTrackedApp(ApplicationId appId, String oldAppId) {
     if (metricsON) {
-      schedulerMetrics.trackApp(appAttemptId, oldAppId);
+      schedulerMetrics.trackApp(appId, oldAppId);
     }
   }
 
-  public void removeTrackedApp(ApplicationAttemptId appAttemptId,
-                               String oldAppId) {
+  public void removeTrackedApp(String oldAppId) {
     if (metricsON) {
-      schedulerMetrics.untrackApp(appAttemptId, oldAppId);
+      schedulerMetrics.untrackApp(oldAppId);
     }
   }
 

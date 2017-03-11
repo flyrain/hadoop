@@ -20,7 +20,8 @@ package org.apache.hadoop.yarn.sls.scheduler;
 
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
-import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
+import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplication;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair
     .FSAppAttempt;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FSQueue;
@@ -62,15 +63,17 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
   }
   
   @Override
-  public void trackApp(ApplicationAttemptId appAttemptId, String oldAppId) {
-    super.trackApp(appAttemptId, oldAppId);
-    FairScheduler fair = (FairScheduler) scheduler;
-    final FSAppAttempt app = fair.getSchedulerApp(appAttemptId);
+  public void trackApp(ApplicationId appId, String oldAppId) {
+    super.trackApp(appId, oldAppId);
+    SchedulerApplication app = (SchedulerApplication)
+        scheduler.getSchedulerApplications().get(appId);
+
     metrics.register("variable.app." + oldAppId + ".demand.memory",
       new Gauge<Long>() {
         @Override
         public Long getValue() {
-          return app.getDemand().getMemorySize();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getDemand().getMemorySize();
         }
       }
     );
@@ -78,7 +81,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Integer>() {
         @Override
         public Integer getValue() {
-          return app.getDemand().getVirtualCores();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getDemand().getVirtualCores();
         }
       }
     );
@@ -86,7 +90,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Long>() {
         @Override
         public Long getValue() {
-          return app.getResourceUsage().getMemorySize();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getResourceUsage().getMemorySize();
         }
       }
     );
@@ -94,7 +99,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Integer>() {
         @Override
         public Integer getValue() {
-          return app.getResourceUsage().getVirtualCores();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getResourceUsage().getVirtualCores();
         }
       }
     );
@@ -102,7 +108,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Long>() {
         @Override
         public Long getValue() {
-          return app.getMinShare().getMemorySize();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getMinShare().getMemorySize();
         }
       }
     );
@@ -110,7 +117,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Long>() {
         @Override
         public Long getValue() {
-          return app.getMinShare().getMemorySize();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getMinShare().getMemorySize();
         }
       }
     );
@@ -118,7 +126,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Long>() {
         @Override
         public Long getValue() {
-          return Math.min(app.getMaxShare().getMemorySize(), totalMemoryMB);
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return Math.min(appAttempt.getMaxShare().getMemorySize(), totalMemoryMB);
         }
       }
     );
@@ -126,7 +135,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Integer>() {
         @Override
         public Integer getValue() {
-          return Math.min(app.getMaxShare().getVirtualCores(), totalVCores);
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return Math.min(appAttempt.getMaxShare().getVirtualCores(), totalVCores);
         }
       }
     );
@@ -134,7 +144,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Integer>() {
         @Override
         public Integer getValue() {
-          return app.getFairShare().getVirtualCores();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getFairShare().getVirtualCores();
         }
       }
     );
@@ -142,7 +153,8 @@ public class FairSchedulerMetrics extends SchedulerMetrics {
       new Gauge<Integer>() {
         @Override
         public Integer getValue() {
-          return app.getFairShare().getVirtualCores();
+          FSAppAttempt appAttempt = (FSAppAttempt)app.getCurrentAppAttempt();
+          return appAttempt.getFairShare().getVirtualCores();
         }
       }
     );
