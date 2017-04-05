@@ -74,17 +74,20 @@ public class TestClusterNodeTracker {
 
   @Test
   public void testSortedNodeList() throws InterruptedException {
-    int i = -4;
-    for(FSSchedulerNode node : nodeTracker.getAllNodes()) {
-      node.deductUnallocatedResource(Resource.newInstance(i * 1024, i));
-      i++;
+    ClusterNodeTracker<FSSchedulerNode> clusterNodeTracker =
+        new ClusterNodeTracker<>();
+
+    List<RMNode> rmNodes =
+        MockNodes.newNodes(2, 4000, Resource.newInstance(4096, 4));
+    for (RMNode rmNode : rmNodes) {
+      clusterNodeTracker.addNode(new FSSchedulerNode(rmNode, false));
     }
 
     new Thread() {
       @Override
       public void run() {
         for (int j = 0; j < 100; j++ ) {
-          for (FSSchedulerNode node : nodeTracker.getAllNodes()) {
+          for (FSSchedulerNode node : clusterNodeTracker.getAllNodes()) {
             int i = ThreadLocalRandom.current().nextInt(-4, 30);
             node.deductUnallocatedResource(Resource.newInstance(i * 1024, i));
           }
@@ -92,16 +95,8 @@ public class TestClusterNodeTracker {
       }
     }.start();
 
-    Thread.sleep(10);
-
     try {
-      List<FSSchedulerNode> nodeIdList =
-          nodeTracker.sortedNodeList(new NodeAvailableResourceComparator());
-
-      for(FSSchedulerNode node : nodeIdList) {
-        System.out.println(node.toString());
-      }
-
+      clusterNodeTracker.sortedNodeList(new NodeAvailableResourceComparator());
     } catch (Exception e) {
       fail(e.getMessage());
     }

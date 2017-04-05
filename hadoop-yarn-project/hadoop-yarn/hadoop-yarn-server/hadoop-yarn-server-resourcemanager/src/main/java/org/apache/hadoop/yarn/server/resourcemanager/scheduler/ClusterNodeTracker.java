@@ -337,9 +337,9 @@ public class ClusterNodeTracker<N extends SchedulerNode> {
     } finally {
       readLock.unlock();
     }
-    //writeLock.lock();
+    writeLock.lock();
     Collections.sort(sortedList, comparator);
-    //writeLock.unlock();
+    writeLock.unlock();
     return sortedList;
   }
 
