@@ -135,9 +135,21 @@ public class ClientRMProxy<T> extends RMProxy<T>  {
 
   @Unstable
   public static Text getAMRMTokenService(Configuration conf) {
-    return getTokenService(conf, YarnConfiguration.RM_SCHEDULER_ADDRESS,
-            YarnConfiguration.DEFAULT_RM_SCHEDULER_ADDRESS,
-            YarnConfiguration.DEFAULT_RM_SCHEDULER_PORT);
+    Text schedulerService = getTokenService(conf,
+        YarnConfiguration.RM_SCHEDULER_ADDRESS,
+        YarnConfiguration.DEFAULT_RM_SCHEDULER_ADDRESS,
+        YarnConfiguration.DEFAULT_RM_SCHEDULER_PORT);
+
+    if (conf.getBoolean(YarnConfiguration.RM_HA_ENABLED,
+        YarnConfiguration.DEFAULT_RM_HA_ENABLED)) {
+      Text adminService = getTokenService(conf,
+          YarnConfiguration.RM_ADMIN_ADDRESS,
+          YarnConfiguration.DEFAULT_RM_ADMIN_ADDRESS,
+          YarnConfiguration.DEFAULT_RM_ADMIN_PORT);
+      return new Text(Joiner.on(",").join(schedulerService, adminService));
+    } else {
+      return schedulerService;
+    }
   }
 
   @Unstable

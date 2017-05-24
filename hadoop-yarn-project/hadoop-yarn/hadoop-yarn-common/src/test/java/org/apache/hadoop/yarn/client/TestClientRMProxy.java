@@ -94,10 +94,11 @@ public class TestClientRMProxy {
         "0.0.0.0");
     tokenService = ClientRMProxy.getAMRMTokenService(conf);
     services = tokenService.toString().split(",");
-    assertEquals(2, services.length);
+    assertEquals(4, services.length);
     for (String service : services) {
       assertTrue("Incorrect token service name",
-          service.contains(defaultRMAddress));
+          service.contains(defaultRMAddress) ||
+              service.contains(YarnConfiguration.DEFAULT_RM_ADMIN_ADDRESS));
     }
   }
 

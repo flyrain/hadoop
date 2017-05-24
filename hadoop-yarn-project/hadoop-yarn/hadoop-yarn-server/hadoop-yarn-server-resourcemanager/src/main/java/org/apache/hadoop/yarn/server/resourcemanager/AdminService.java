@@ -175,7 +175,7 @@ public class AdminService extends CompositeService implements
     YarnRPC rpc = YarnRPC.create(conf);
     this.server = (Server) rpc.getServer(
         ResourceManagerAdministrationProtocol.class, this, masterServiceBindAddress,
-        conf, null,
+        conf, this.rmContext.getAMRMTokenSecretManager(),
         conf.getInt(YarnConfiguration.RM_ADMIN_CLIENT_THREAD_COUNT,
             YarnConfiguration.DEFAULT_RM_ADMIN_CLIENT_THREAD_COUNT));
 
