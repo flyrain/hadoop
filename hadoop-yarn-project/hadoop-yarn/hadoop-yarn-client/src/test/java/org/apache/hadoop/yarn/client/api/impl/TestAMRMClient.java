@@ -128,10 +128,10 @@ public class TestAMRMClient {
   @Before
   public void setup() throws Exception {
     conf = new YarnConfiguration();
-    createClusterAndStartApplication();
+    createClusterAndStartApplication(1);
   }
 
-  private void createClusterAndStartApplication() throws Exception {
+  private void createClusterAndStartApplication(int numRM) throws Exception {
     // start minicluster
     conf.set(YarnConfiguration.RM_SCHEDULER, schedulerName);
     conf.setLong(
@@ -142,7 +142,8 @@ public class TestAMRMClient {
     // set the minimum allocation so that resource decrease can go under 1024
     conf.setInt(YarnConfiguration.RM_SCHEDULER_MINIMUM_ALLOCATION_MB, 512);
     conf.setLong(YarnConfiguration.NM_LOG_RETAIN_SECONDS, 1);
-    yarnCluster = new MiniYARNCluster(TestAMRMClient.class.getName(), nodeCount, 1, 1);
+    yarnCluster = new MiniYARNCluster(TestAMRMClient.class.getName(), numRM,
+        nodeCount, 1, 1);
     yarnCluster.init(conf);
     yarnCluster.start();
 
@@ -878,7 +879,21 @@ public class TestAMRMClient {
     teardown();
     conf = new YarnConfiguration();
     conf.set(CommonConfigurationKeysPublic.HADOOP_RPC_PROTECTION, "privacy");
-    createClusterAndStartApplication();
+    createClusterAndStartApplication(1);
+    initAMRMClientAndTest(false);
+  }
+
+  @Test (timeout=60000)
+  public void testAMRMClientGetHAState() throws Exception {
+    // we have to create a new instance of MiniYARNCluster to avoid SASL qop
+    // mismatches between client and server
+    teardown();
+    conf = new YarnConfiguration();
+    conf.setBoolean(YarnConfiguration.RM_HA_ENABLED, true);
+    conf.setBoolean(YarnConfiguration.AUTO_FAILOVER_ENABLED, false);
+    conf.set(YarnConfiguration.RM_WEBAPP_ADDRESS, "localhost:0");
+
+    createClusterAndStartApplication(2);
     initAMRMClientAndTest(false);
   }
 
