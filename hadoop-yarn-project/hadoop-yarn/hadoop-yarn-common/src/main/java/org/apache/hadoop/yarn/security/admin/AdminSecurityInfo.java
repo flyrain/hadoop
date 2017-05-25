@@ -66,16 +66,15 @@ public class AdminSecurityInfo extends SecurityInfo {
     if (!protocol.equals(HAServiceProtocolPB.class)) {
       return null;
     }
-    return new TokenInfo() {
 
+    return new TokenInfo() {
       @Override
       public Class<? extends Annotation> annotationType() {
         return null;
       }
 
       @Override
-      public Class<? extends TokenSelector<? extends TokenIdentifier>>
-      value() {
+      public Class<? extends TokenSelector<? extends TokenIdentifier>> value() {
         return AMRMTokenSelector.class;
       }
     };

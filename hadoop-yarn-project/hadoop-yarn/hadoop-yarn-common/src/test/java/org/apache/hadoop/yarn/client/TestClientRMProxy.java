@@ -73,17 +73,13 @@ public class TestClientRMProxy {
 
   @Test
   public void testGetAMRMTokenService() {
-    String defaultRMAddress = YarnConfiguration.DEFAULT_RM_SCHEDULER_ADDRESS;
     YarnConfiguration conf = new YarnConfiguration();
 
     // HA is not enabled
     Text tokenService = ClientRMProxy.getAMRMTokenService(conf);
     String[] services = tokenService.toString().split(",");
-    assertEquals(1, services.length);
-    for (String service : services) {
-      assertTrue("Incorrect token service name",
-          service.contains(defaultRMAddress));
-    }
+    assertEquals(2, services.length);
+    verfiyServicesAddresses(services);
 
     // HA is enabled
     conf.setBoolean(YarnConfiguration.RM_HA_ENABLED, true);
@@ -95,10 +91,17 @@ public class TestClientRMProxy {
     tokenService = ClientRMProxy.getAMRMTokenService(conf);
     services = tokenService.toString().split(",");
     assertEquals(4, services.length);
+    verfiyServicesAddresses(services);
+  }
+
+  private void verfiyServicesAddresses(String[] services) {
+    String rmSchedulerAddress = YarnConfiguration.DEFAULT_RM_SCHEDULER_ADDRESS;
+    String rmAdminAddress = YarnConfiguration.DEFAULT_RM_ADMIN_ADDRESS;
+
     for (String service : services) {
       assertTrue("Incorrect token service name",
-          service.contains(defaultRMAddress) ||
-              service.contains(YarnConfiguration.DEFAULT_RM_ADMIN_ADDRESS));
+          service.contains(rmSchedulerAddress) ||
+              service.contains(rmAdminAddress));
     }
   }
 
